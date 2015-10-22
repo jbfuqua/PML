@@ -1,0 +1,154 @@
+---
+title: "Activity Tracker Data Analysis and Prediction"
+author: "Joe Fuqua"
+date: "October 21, 2015"
+output: html_document
+---
+
+# Overview
+
+This assignment takes activity tracker data from this source:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+to build a predictive model that determines the type or 'classe' of device for each of the test cases from this source:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+I have downloaded these files to a local directory to allow for work offline.
+
+# Loading and Inspecting the data
+
+Libraries first:
+
+```{r}
+library(ggplot2)
+library(lattice)
+library(caret)
+library(rattle)
+library(randomForest)
+
+```
+
+Early exploratory analysis shows a large number of columns with no data or NA, or #DIV/0.  During the load, we will standardize those entries to NA for easier identification later (exploratory graphs omitted to conserve space):
+
+```{r}
+
+trdata<-read.csv("pml-training.csv",na.strings=c("NA","NULL","#DIV/0",""))
+tstdata<-read.csv("pml-testing.csv",na.strings=c("NA","NULL","#DIV/0",""))
+
+```
+ 
+Some information on the datasets:
+ 
+```{r, eval=FALSE}
+
+str(trdata)
+str(tstdata)
+
+```
+
+This shows we have 19,622 observations for training and 20 for testing with 160 variables for each.
+
+# Data Cleansing
+
+Let's remove columns that are mostly NA, as well as the first 6 columns (row number, time stamp, etc) that are not useful to the model.
+
+```{r}
+remcols <- vector(mode="numeric")
+
+for (i in 1:ncol(trdata)) {
+  remcols[i]<- (sum(complete.cases(trdata[,i]))/nrow(trdata) != 1)
+}
+
+trdata<-trdata[,!remcols]
+trdata<-trdata[,-c(1:6)]
+dim(trdata)
+
+
+
+```
+
+Down to 54 variables, one of which is the variable we are trying to predict, 'classe'.
+
+# Predictive Model
+
+Okay, time to build our predictive model.  Given the variable we are trying to predict ('classe') is a factor, let's use a Random Forest model (after subsetting the training data):
+
+```{r}
+set.seed(1)
+trainSegment<-createDataPartition(y=trdata$classe, p=.6, list=FALSE)
+
+subtrain<-trdata[trainSegment,]
+subtest<-trdata[-trainSegment,]
+
+dim(subtrain)
+dim(subtest)
+
+
+```
+
+Now the model (note I initially ran the model with the 'train' function from the 'caret' package, but performance was unacceptable).
+
+```{r}
+#modFit<-train(classe~.,data=subtrain, method='rf', 
+#                trControl=trainControl(method="cv",number=5),
+#                prox=TRUE,allowParallel=TRUE)
+
+modFit<-randomForest(classe~., data=subtrain, nodesize=42, ncores=2)
+
+modFit
+
+```
+
+So, a fairly good fit with a OOB sample error rate of 1.27%.
+
+A quick look at error rates by predicted value:
+
+```{r}
+plot(modFit,log='y')
+legend('topright',legend=colnames(modFit$err.rate),col=1:5,cex=0.8,fill=1:4)
+
+```
+
+We could simplify the fit by selecting fewer variables that have more influence on the model:
+
+```{r}
+ varImpPlot(modFit,)
+```
+
+But this model runs reasonably quickly and appears to be highly accurate.
+
+# Cross Validation
+
+Now run against the subset of test data from the training dataset.
+
+```{r}
+
+predmodel<-predict(modFit,newdata=subtest)
+confusionMatrix(subtest$class,predmodel)
+
+```
+
+So, we get a 99% accuracy rate (1% sampling error) on the subset of test data.  
+
+# Predition
+
+We are ready to evaluate the actual testing dataset:
+
+```{r}
+
+# Apply earlier filters to the testing dataset
+
+tstdata<-tstdata[,!remcols]
+tstdata<-tstdata[,-c(1:6)]
+dim(tstdata)
+
+# run the predictive model
+
+
+answer<-predict(modFit, newdata=tstdata)
+answer
+```
+
+
